@@ -1,0 +1,9 @@
+# Ignore virtual environment
+venv/
+
+# Ignore API key file
+.env
+
+# Ignore FAISS index folders
+faiss_index_bns/
+faiss_index_bnss/
