@@ -24,6 +24,14 @@ if not groq_api_key:
     st.error("Groq API key not found. Please create a .env file with GROQ_API_KEY='your_key'.")
     st.stop()
 
+# --- Function to check if FAISS index files exist ---
+def index_exists(index_path):
+    return (
+        os.path.isdir(index_path) and
+        os.path.isfile(os.path.join(index_path, "index.faiss")) and
+        os.path.isfile(os.path.join(index_path, "index.pkl"))
+    )
+
 # --- Caching the Agent Creation ---
 @st.cache_resource
 def build_agent():
@@ -35,11 +43,11 @@ def build_agent():
     BNSS_INDEX_PATH = "faiss_index_bnss"
     EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
-    # Check if index files exist
-    if not os.path.exists(BNS_INDEX_PATH) or not os.path.exists(BNSS_INDEX_PATH):
+    # Check if FAISS index files exist
+    if not index_exists(BNS_INDEX_PATH) or not index_exists(BNSS_INDEX_PATH):
         st.error("FAISS index files not found. Please run the `build_index.py` script first.")
         return None
-    
+
     # Load the embedding model
     embeddings_model = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
@@ -50,29 +58,36 @@ def build_agent():
     # Create retriever tools from the loaded indexes
     bns_retriever = bns_vector_store.as_retriever(search_kwargs={"k": 4})
     bnss_retriever = bnss_vector_store.as_retriever(search_kwargs={"k": 4})
-    
-    bns_tool = create_retriever_tool(bns_retriever, "bns_law_search", "Searches the Bharatiya Nyaya Sanhita (BNS) for definitions of crimes and punishments.")
-    bnss_tool = create_retriever_tool(bnss_retriever, "bnss_procedure_search", "Searches the Bharatiya Nagarik Suraksha Sanhita (BNSS) for legal procedures.")
+
+    bns_tool = create_retriever_tool(
+        bns_retriever,
+        "bns_law_search",
+        "Searches the Bharatiya Nyaya Sanhita (BNS) for definitions of crimes and punishments."
+    )
+    bnss_tool = create_retriever_tool(
+        bnss_retriever,
+        "bnss_procedure_search",
+        "Searches the Bharatiya Nagarik Suraksha Sanhita (BNSS) for legal procedures."
+    )
     tools = [bns_tool, bnss_tool]
-    
+
     # Create the agent prompt
     prompt = hub.pull("hwchase17/react-chat")
     new_rules = """
-
 **VERY IMPORTANT RULES FOR YOUR FINAL ANSWER**:
 1. Structure your response clearly with markdown. Use bold headings for each part of the user's question (e.g., **Punishment for Assault (BNS)** and **Reporting Procedure (BNSS)**).
 2. Under each heading, first provide a concise, one-sentence summary of the answer.
 3. After the summary, add a bullet point labeled "**Source Quote:**" and provide the single, most relevant quote from the source text that supports your summary. Keep the quote as short as possible.
 """
     prompt.template += new_rules
-    
+
     # Create the agent
-    llm = ChatGroq(model_name="llama3-70b-8192", temperature=0)
+    llm = ChatGroq(
+        model_name="llama-3.3-70b-versatile", 
+        temperature=0)
     agent = create_react_agent(llm, tools, prompt)
     st.success("Agent is ready!")
-    
-    # --- THIS IS THE FIX ---
-    # Add handle_parsing_errors=True to make the agent more robust
+
     return AgentExecutor(agent=agent, tools=tools, verbose=False, handle_parsing_errors=True)
 
 # Build the agent
@@ -99,7 +114,7 @@ if prompt := st.chat_input("Ask a question..."):
         with st.spinner("The agent is thinking..."):
             agent_chat_history = [msg for msg in st.session_state.messages if msg['role'] != 'user']
             response = agent_executor.invoke({"input": prompt, "chat_history": agent_chat_history})
-            
+
             output = response["output"]
             full_response = ""
             message_placeholder = st.empty()
