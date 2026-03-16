@@ -1,7 +1,9 @@
-import streamlit as st
 import os
-import time
+from functools import lru_cache
 from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Dict, Any
 
 # --- All your existing LangChain imports ---
 from langchain_community.vectorstores import FAISS
@@ -11,19 +13,19 @@ from langchain.tools.retriever import create_retriever_tool
 from langchain import hub
 from langchain.agents import create_react_agent, AgentExecutor
 
-# --- App Configuration ---
-st.set_page_config(page_title="Legal Chat Agent", page_icon="⚖️", layout="wide")
-st.title("⚖️ Agentic Legal Assistant")
-st.caption("Query the BNS and BNSS documents using an advanced AI agent.")
+# --- FastAPI App ---
+app = FastAPI(
+    title="Legal Chat Agent",
+    description="Query the BNS and BNSS documents using an advanced AI agent.",
+)
 
 # --- API Key Setup ---
 load_dotenv()
 groq_api_key = os.getenv("GROQ_API_KEY")
 if not groq_api_key:
-    st.error(
+    raise RuntimeError(
         "Groq API key not found. Please create a .env file with GROQ_API_KEY='your_key'."
     )
-    st.stop()
 
 
 # --- Function to check if FAISS index files exist ---
@@ -36,10 +38,9 @@ def index_exists(index_path):
 
 
 # --- Caching the Agent Creation ---
-@st.cache_resource
+@lru_cache(maxsize=1)
 def build_agent():
     """Builds the agent by loading pre-built FAISS indexes."""
-    st.info("Loading knowledge base... This should be quick!")
 
     # Define paths and embedding model
     BNS_INDEX_PATH = "faiss_index_bns"
@@ -48,10 +49,9 @@ def build_agent():
 
     # Check if FAISS index files exist
     if not index_exists(BNS_INDEX_PATH) or not index_exists(BNSS_INDEX_PATH):
-        st.error(
+        raise RuntimeError(
             "FAISS index files not found. Please run the `build_index.py` script first."
         )
-        return None
 
     # Load the embedding model
     embeddings_model = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
@@ -94,54 +94,52 @@ def build_agent():
     # Create the agent
     llm = ChatGroq(model_name="llama-3.3-70b-versatile", temperature=0)
     agent = create_react_agent(llm, tools, prompt)
-    st.success("Agent is ready!")
 
     return AgentExecutor(
         agent=agent, tools=tools, verbose=False, handle_parsing_errors=True
     )
 
 
-# Build the agent
-agent_executor = build_agent()
+# --- Pydantic Models ---
+class ChatRequest(BaseModel):
+    message: str
+    history: List[Dict[str, Any]] = []
 
-if agent_executor is None:
-    st.stop()
 
-# --- Chat History Management ---
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "assistant",
-            "content": "Hello! How can I help you with the BNS or BNSS today?",
-        }
-    ]
+class ChatResponse(BaseModel):
+    response: str
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
 
-# --- Handle User Input ---
-if prompt := st.chat_input("Ask a question..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+# --- Endpoints ---
+@app.on_event("startup")
+async def startup_event():
+    # Build the agent on startup
+    global agent_executor
+    agent_executor = build_agent()
 
-    with st.chat_message("assistant"):
-        with st.spinner("The agent is thinking..."):
-            agent_chat_history = [
-                msg for msg in st.session_state.messages if msg["role"] != "user"
-            ]
-            response = agent_executor.invoke(
-                {"input": prompt, "chat_history": agent_chat_history}
-            )
 
-            output = response["output"]
-            full_response = ""
-            message_placeholder = st.empty()
-            for chunk in output.split():
-                full_response += chunk + " "
-                time.sleep(0.02)
-                message_placeholder.markdown(full_response + "▌")
-            message_placeholder.markdown(full_response)
+@app.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
-    st.session_state.messages.append({"role": "assistant", "content": output})
+    # Prepare chat history (exclude user messages as per original logic)
+    agent_chat_history = [msg for msg in request.history if msg.get("role") != "user"]
+
+    try:
+        response = agent_executor.invoke(
+            {"input": request.message, "chat_history": agent_chat_history}
+        )
+        output = response["output"]
+        return ChatResponse(response=output)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error processing request: {str(e)}"
+        )
+
+
+@app.get("/")
+async def root():
+    return {
+        "message": "Welcome to the Legal Chat Agent API. Use POST /chat to interact."
+    }
