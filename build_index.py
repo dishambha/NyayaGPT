@@ -2,7 +2,7 @@ import os
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 # --- Configuration ---
 BNS_PDF_PATH = "BNS.pdf"
@@ -47,4 +47,4 @@ if __name__ == "__main__":
     # Build and save the index for the BNSS document
     build_and_save_index(BNSS_PDF_PATH, BNSS_INDEX_PATH)
     
-    print("\n--- All indexes have been built and saved. You can now run the Streamlit app. ---")
+    print("\n--- All indexes have been built and saved. You can now run the FastAPI service. ---")

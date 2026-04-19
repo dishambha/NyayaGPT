@@ -1,0 +1,17 @@
+[Unit]
+Description=NyayaGPT Backend FastAPI Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/nyayagpt
+EnvironmentFile=/opt/nyayagpt/backend/.env
+ExecStart=/opt/nyayagpt/.venv/bin/uvicorn backend.api:app --host 127.0.0.1 --port 8000 --workers 2
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

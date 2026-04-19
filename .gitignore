@@ -1,6 +1,8 @@
 # Ignore virtual environment
 venv/
-
+.venv/
 # Ignore API key file
 .env
 
+DEPLOY_UBUNTU.md
+__pycache__/
